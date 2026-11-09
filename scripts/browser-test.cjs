@@ -1,0 +1,41 @@
+const { chromium } = require('playwright');
+const { pathToFileURL } = require('node:url');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+(async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ offline: true, acceptDownloads: true });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(pathToFileURL(path.resolve('index.html')).href);
+    await page.waitForFunction(() => state.ready);
+    await page.locator('#file').setInputFiles(path.resolve('demo.html'));
+    await page.waitForFunction(() => state.ready && state.name === 'demo.html');
+    await page.evaluate(() => selector.select(state.nodes.find(n => n.element.id === 'hero-title').id));
+    await page.getByRole('textbox', { name: 'width', exact: true }).fill('340px');
+    await page.getByRole('textbox', { name: 'width', exact: true }).press('Enter');
+    await page.waitForFunction(() => state.changes[state.selected]?.width?.value === '340px');
+    await page.click('#undo');
+    assert.equal(await page.evaluate(() => Object.keys(state.changes).length), 0);
+    await page.click('#redo');
+    await page.click('#prompt');
+    const prompt = await page.locator('#output').inputValue();
+    assert.ok(prompt.includes('340px') && prompt.includes('#hero-title'));
+    await page.locator('#exportDialog button').filter({ hasText: 'Закрыть' }).click();
+    const download = page.waitForEvent('download');
+    await page.click('#save');
+    assert.ok((await download).suggestedFilename().endsWith('-edited.html'));
+    await page.evaluate(() => renderer.load('<div id="probe">Safe</div><script>parent.document.body.innerHTML="PWNED"<\/script><img src=x onerror="parent.document.body.innerHTML=\'PWNED\'">', 'security.html'));
+    await page.waitForFunction(() => state.ready && state.name === 'security.html');
+    assert.equal(await page.locator('#preview').getAttribute('sandbox'), 'allow-scripts');
+    const preview = page.frames().find(f => f !== page.mainFrame());
+    assert.equal(await preview.locator('script').count(), 1, 'Only trusted bridge may remain');
+    assert.equal(await preview.locator('[onerror]').count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    assert.deepEqual(errors, []);
+    console.log('Offline loading, editing, history, prompt, download, isolation and narrow layout OK');
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });
